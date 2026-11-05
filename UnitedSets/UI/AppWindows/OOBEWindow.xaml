@@ -204,7 +204,7 @@
                                                     <LineBreak/>
                                                     ✓ Open source
                                                 </TextBlock>
-                                                <HyperlinkButton Margin="6, 0, 0, 0" Content="GitHub" NavigateUri="https://github.com/Windows-Apps-Hub/UnitedSets"/>
+                                                <HyperlinkButton Margin="6, 0, 0, 0" Content="GitHub" NavigateUri="https://github.com/FzeNiX/UnitedSetsX"/>
                                             </StackPanel>
                                         </StackPanel>
                                     </Grid>

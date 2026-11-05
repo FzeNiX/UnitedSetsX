@@ -1,10 +1,8 @@
-
 # Terms
 
 By using any part of the software, you agree to the [repository license](./LICENSE).
 
-# Privacy Policy
+# Privacy
 
-We ourselves curerntly do not collect and upload any user data to the internet.
-
-However, Microsoft Store might collect some information for analytic report or debugging information and for this you should go ahead and look at their privacy policy to see what they collected.
+United Sets X does not collect, store or send any data over the internet.
+Its settings and logs stay on your computer (`Documents\UnitedSets` and `%AppData%\UnitedSets`).

@@ -64,8 +64,8 @@
         <StackPanel HorizontalAlignment="Center" Orientation="Vertical" Spacing="4" Margin="0,20,0,0" Visibility="{x:Bind usapp:Constants.ExperimentalFeedback}">
             <TextBlock VerticalAlignment="Center" Text="Experimental Version: Your feedback is important."/>
             <StackPanel HorizontalAlignment="Center" Orientation="Horizontal" Spacing="4">
-                <HyperlinkButton Content="Discord" NavigateUri="https://discord.gg/3WYcKat"/>
-                <HyperlinkButton Content="Github Issues" NavigateUri="https://github.com/Windows-Apps-Hub/UnitedSets/issues/71"/>
+                <HyperlinkButton Content="Releases" NavigateUri="https://github.com/FzeNiX/UnitedSetsX/releases"/>
+                <HyperlinkButton Content="GitHub Issues" NavigateUri="https://github.com/FzeNiX/UnitedSetsX/issues"/>
             </StackPanel>
         </StackPanel>
     </StackPanel>

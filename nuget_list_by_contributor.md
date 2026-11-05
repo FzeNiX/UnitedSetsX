@@ -1,17 +1,14 @@
-# Nuget Packages List this is owned by the contributor
+# NuGet packages from the United Sets authors
 
-We've included the list of nuget packages that we own (and is referenced in United Sets) here, so that people can check the source code for transparency.
+United Sets X uses several NuGet packages published by the authors of the original United Sets.
+Their source code is available here:
 
-- Get.Data [source](https://github.com/GetGet99/Get.Data)
-- Get.Data.SoureGenerator [source](https://github.com/GetGet99/Get.Data)
-- Get.EasyCsharp [source](https://github.com/GetGet99/Get.EasyCSharp)
-- Get.EasyCSharp.Generator [source](https://github.com/GetGet99/Get.EasyCSharp)
-- Get.UI Data.WASDK [source](https://github.com/Gtudios-UI/UI-Data)
-- Get.UI.WinUI [source](https://github.com/GetGet99/Get.UI)
-- Get.XAMLTools.Generator [source](https://github.com/GetGet99/Get.XAMLTools)
-- WinWrapper.Taskbar [source](https://github.com/GetGet99/WinWrapper)
-- WinWrapper.Windowing [source](https://github.com/GetGet99/WinWrapper)
+- Get.Data, Get.Data.SourceGenerators — https://github.com/GetGet99/Get.Data
+- Get.EasyCSharp, Get.EasyCSharp.Generator — https://github.com/GetGet99/Get.EasyCSharp
+- Get.UI.Data.WASDK — https://github.com/Gtudios-UI/UI-Data
+- Get.UI.WinUI — https://github.com/GetGet99/Get.UI
+- Get.XAMLTools.Generator — https://github.com/GetGet99/Get.XAMLTools
+- WinWrapper.Taskbar, WinWrapper.Windowing — https://github.com/GetGet99/WinWrapper
+- QuickMarkup (UI markup source generator)
 
-Other Nuget Packages not owned by us can be seen in the
-[CSPROJ](https://github.com/Windows-Apps-Hub/UnitedSets/blob/master/UnitedSets/UnitedSets.csproj) file. If you recognize any other ones owned
-by us and we didn't put it here, feel free to open the issue about it.
+Note: `Get.UI.Data.WASDK` 1.0.7 is used because newer versions are not published on nuget.org.

@@ -34,7 +34,9 @@ partial class MainWindow
                     var icon = Icon.FromFile(y);
                     this.SetTaskBarIcon(icon);
                 }
-                else throw new FileNotFoundException($"File not found: {y}");
+                else
+                    // a missing icon must not prevent the set window from opening (it used to throw here)
+                    Helpers.CrashLog.Write("Taskbar icon", new FileNotFoundException($"File not found: {y}"));
             }
         });
         SetupSetting(settings.BackdropMode, x => SystemBackdrop = x.GetSystemBackdrop());

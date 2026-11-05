@@ -1,14 +1,18 @@
-# Contributing Guidelines
+# Contributing
+
+Bug reports, ideas and pull requests are welcome.
 
 ## Issues
 
-You can submit any issuues. Please have the prefix `[Feature Request]` or `[Bug]` in the title, otherwise, we will add it.
+Use the issue templates and start the title with `[Bug]` or `[Feature Request]`.
+For bugs, please include:
 
-Please note that not all issues will be fixed. Ones that will take us too much time than we would
-like to spend might be put in low priolity. If you would like, you're welcomed to submit
-a pull request linking the issue and we can review it. Pull Requests are always welcomed.
+- what you did and what happened,
+- the applications involved (name and version),
+- your Windows version and display scaling,
+- `%AppData%\UnitedSets\error.log` if it exists.
 
-## Pull Requests
+## Pull requests
 
-Pull Requests are welcomed. we might have to review them first to see what it does,
-which might takes some time. Note that the final code style might be altered.
+- Build with `dotnet build UnitedSets/UnitedSets.csproj -c DebugUnpackaged -p:Platform=x64` before submitting.
+- Keep changes focused; describe what you tested (which applications, single / multiple monitors).
