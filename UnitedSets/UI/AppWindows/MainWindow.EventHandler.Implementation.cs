@@ -56,6 +56,7 @@ public sealed partial class MainWindow
 
     private partial void TabSelectionChanged()
     {
+        if (IsClosed) return;
         UpdateHomeVisibility();
         UpdateTitle();
     }
@@ -64,7 +65,10 @@ public sealed partial class MainWindow
     /// and, on small windows, showed through the tab strip.
     /// </summary>
     void UpdateHomeVisibility()
-        => UnitedSetsHomeBackground.Visibility = SelectedTab is null ? Visibility.Visible : Visibility.Collapsed;
+    {
+        if (IsClosed) return;
+        UnitedSetsHomeBackground.Visibility = SelectedTab is null ? Visibility.Visible : Visibility.Collapsed;
+    }
 
     private async Task SafeClose(TabBase tab)
     {

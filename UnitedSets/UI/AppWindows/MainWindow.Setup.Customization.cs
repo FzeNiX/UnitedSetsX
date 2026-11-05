@@ -15,7 +15,17 @@ partial class MainWindow
 
         void SetupSetting<T>(Setting<T> setting, Action<T> onUpdate)
         {
-            setting.PropertyChanged += (_, _) => onUpdate(setting.Value);
+            // The settings live as long as the app, this window doesn't: unsubscribe when it closes.
+            // (Changing a setting after a set window was closed used to update the closed window, e.g. set its
+            // SystemBackdrop, which crashed the whole app.)
+            PropertyChangedEventHandler handler = (_, _) =>
+            {
+                if (IsClosed) return;
+                try { onUpdate(setting.Value); }
+                catch (Exception ex) { Helpers.CrashLog.Write($"Applying setting {setting.Title}", ex); }
+            };
+            setting.PropertyChanged += handler;
+            Closed += (_, _) => setting.PropertyChanged -= handler;
             onUpdate(setting.Value);
         }
         void SetupStartupSetting<T>(Setting<T> setting, Action<T> onUpdate)

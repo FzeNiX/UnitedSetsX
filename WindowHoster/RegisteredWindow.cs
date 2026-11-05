@@ -50,6 +50,9 @@ public partial class RegisteredWindow : INotifyPropertyChanged
             WindowToHost.SendMessage(WindowMessages.SysCommand, /* SC_RESTORE */ 0xF120, 0);
 
         InitalStylingState = WindowStylingState.GetCurrentState(WindowToHost);
+        // No show/hide animation while it is a tab: switching tabs hides one window and shows another, and the
+        // fade animations made both visible (blended) for ~100 ms, which looked like a flicker.
+        SetTransitionsDisabled(WindowToHost, true);
 
         Window = WindowToHost;
 
@@ -130,6 +133,7 @@ public partial class RegisteredWindow : INotifyPropertyChanged
         Closed += delegate { BecomesInvalid?.Invoke(); };
         Detached += delegate { BecomesInvalid?.Invoke(); };
         Properties = new(this);
+        AllRegistered[this] = 0;
     }
     WinEventsRegistrationParameters registeredWindowClosedEvent, registeredPosSizeChangedEvent,
         registeredWindowShownEvent, registeredMoveSizeStartEvent, registeredMoveSizeEndEvent;
@@ -190,8 +194,22 @@ public partial class RegisteredWindow : INotifyPropertyChanged
     /// The last measured invisible resize borders (see <see cref="RegisteredWindowController"/>)
     /// </summary>
     internal InvisibleBorders? CachedInvisibleBorders;
+    /// <summary>
+    /// Every valid registered window (used to keep the hidden windows of a host sized like the visible one)
+    /// </summary>
+    internal static readonly System.Collections.Concurrent.ConcurrentDictionary<RegisteredWindow, byte> AllRegistered = new();
+    /// <summary>
+    /// The host window this window was last shown in
+    /// </summary>
+    internal nint LastHost;
+    /// <summary>
+    /// The area (screen pixels, without the invisible borders compensation) this window last covered in <see cref="LastHost"/>
+    /// </summary>
+    internal System.Drawing.Rectangle LastArea;
+
     internal void InternalUpdateParent(Window parent)
     {
+        LastHost = parent.Handle;
         var window = Window;
         // A tabbed window has no taskbar button of its own: the host represents it.
         // (WS_EX_APPWINDOW forces a button even for owned windows. The original extended styles are
@@ -206,6 +224,7 @@ public partial class RegisteredWindow : INotifyPropertyChanged
     {
         if (disposed) return;
         disposed = true;
+        AllRegistered.TryRemove(this, out _);
         registeredWindowClosedEvent.Unregister();
         registeredPosSizeChangedEvent.Unregister();
         registeredWindowShownEvent.Unregister();
@@ -259,6 +278,7 @@ public partial class RegisteredWindow : INotifyPropertyChanged
             // NoOwner compatibility mode adds WS_EX_TOOLWINDOW which hides the window from the taskbar
             // and Alt+Tab. Always restore the original extended styles.
             WindowToHost.ExStyle = InitalStylingState.ExStyles;
+            SetTransitionsDisabled(WindowToHost, false);
             WindowToHost.IsResizable = InitalStylingState.IsResizable;
             WindowToHost.IsVisible = true;
 
@@ -310,6 +330,15 @@ public partial class RegisteredWindow : INotifyPropertyChanged
     }
 }
 internal readonly record struct InvisibleBorders(int Left, int Top, int Right, int Bottom);
+partial class RegisteredWindow
+{
+    static unsafe void SetTransitionsDisabled(Window window, bool disabled)
+    {
+        Windows.Win32.Foundation.BOOL value = disabled;
+        Windows.Win32.PInvoke.DwmSetWindowAttribute((Windows.Win32.Foundation.HWND)window.Handle,
+            Windows.Win32.Graphics.Dwm.DWMWINDOWATTRIBUTE.DWMWA_TRANSITIONS_FORCEDISABLED, &value, (uint)sizeof(Windows.Win32.Foundation.BOOL));
+    }
+}
 public enum HostedWindowStateRequest
 {
     Minimize,

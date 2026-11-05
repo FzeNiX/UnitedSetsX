@@ -26,6 +26,7 @@ public sealed partial class MainWindow : NativeHelperWindow
 
     void OnTabsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
+        if (IsClosed) return;
         if (e.OldItems is not null)
             foreach (TabBase tab in e.OldItems)
                 if (tab.ParentWindow == this && !Tabs.Contains(tab))
@@ -84,8 +85,14 @@ public sealed partial class MainWindow : NativeHelperWindow
         taskbarTabs.Dispose();
         UnitedSetsApp.Current.UnregisterSetWindow(this);
         allowClose = true;
+        IsClosed = true;
         Close();
     }
+
+    /// <summary>
+    /// The window has been closed: nothing may be done with it anymore
+    /// </summary>
+    public bool IsClosed { get; private set; }
 
     public void Maximize()
     {

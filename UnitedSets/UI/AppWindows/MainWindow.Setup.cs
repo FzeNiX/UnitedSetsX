@@ -28,8 +28,12 @@ partial class MainWindow : NativeHelperWindow
 
         Init();
         taskbarTabs = new(this);
+        Closed += (_, _) => IsClosed = true;
         SelectedTabProp.Watch(tab =>
         {
+            // updates that arrive after the window was closed (e.g. its last tab was closed) must not touch it:
+            // that threw 0x800710DD and crashed the app
+            if (IsClosed) return;
             taskbarTabs.OnSelectionChanged(previousSelectedTab);
             previousSelectedTab = tab;
             tab?.IsFlashing = false;
@@ -92,6 +96,7 @@ partial class MainWindow : NativeHelperWindow
 
     private void UpdateTitle()
     {
+        if (IsClosed) return;
         var prefix = Configuration.TitlePrefix;
         if (SelectedTab is { } tab)
             prefix = Tabs.Count > 1

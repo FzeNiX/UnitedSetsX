@@ -22,3 +22,4 @@ DwmGetWindowAttribute
 DWMWINDOWATTRIBUTE
 IsWindowVisible
 SetWindowPos
+DwmSetWindowAttribute

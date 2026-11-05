@@ -4,6 +4,7 @@ using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.Graphics.Dwm;
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using Microsoft.UI.Dispatching;
 using System.Threading;
@@ -59,6 +60,89 @@ public partial class RegisteredWindowController
 
     static readonly System.Collections.Concurrent.ConcurrentDictionary<RegisteredWindowController, byte> Active = new();
 
+    // ---- deferred hiding (tab switches without a flash) ----
+    static readonly object pendingHideLock = new();
+    static readonly List<(nint Host, RegisteredWindow Window, long Deadline)> pendingHides = [];
+    static Timer? pendingHideTimer;
+    /// <summary>
+    /// How long to wait for another window to be shown before hiding anyway (e.g. switching to an empty tab)
+    /// </summary>
+    const int PendingHideTimeoutMs = 300;
+
+    static void SchedulePendingHide(nint host, RegisteredWindow window)
+    {
+        lock (pendingHideLock)
+        {
+            pendingHides.Add((host, window, Environment.TickCount64 + PendingHideTimeoutMs));
+            pendingHideTimer ??= new Timer(_ => HideExpired(), null, 50, 50);
+        }
+    }
+
+    static void HideExpired()
+    {
+        List<RegisteredWindow> toHide = [];
+        lock (pendingHideLock)
+        {
+            var now = Environment.TickCount64;
+            for (int i = pendingHides.Count - 1; i >= 0; i--)
+                if (pendingHides[i].Deadline <= now)
+                {
+                    toHide.Add(pendingHides[i].Window);
+                    pendingHides.RemoveAt(i);
+                }
+        }
+        foreach (var w in toHide) HideIfStillUnused(w);
+    }
+
+    /// <summary>
+    /// Hides the windows that were waiting to be hidden on <paramref name="host"/>, now that <paramref name="shown"/> covers the area
+    /// </summary>
+    static void FlushPendingHides(nint host, RegisteredWindow shown)
+    {
+        List<RegisteredWindow> toHide = [];
+        lock (pendingHideLock)
+        {
+            for (int i = pendingHides.Count - 1; i >= 0; i--)
+                if (pendingHides[i].Host == host || pendingHides[i].Window == shown)
+                {
+                    if (pendingHides[i].Window != shown)
+                        toHide.Add(pendingHides[i].Window);
+                    pendingHides.RemoveAt(i);
+                }
+        }
+        foreach (var w in toHide) HideIfStillUnused(w);
+    }
+
+    /// <summary>
+    /// The window of the previous tab of <paramref name="host"/>, if it is still visible (waiting to be hidden)
+    /// </summary>
+    static Window? GetVisiblePendingHide(nint host, RegisteredWindow except)
+    {
+        lock (pendingHideLock)
+        {
+            for (int i = pendingHides.Count - 1; i >= 0; i--)
+            {
+                var (h, w, _) = pendingHides[i];
+                if (h != host || w == except || !w.IsValid || w.CurrentController is not null) continue;
+                var window = w.Window;
+                if (window.IsVisible) return window;
+            }
+        }
+        return null;
+    }
+
+    static void HideIfStillUnused(RegisteredWindow w)
+    {
+        try
+        {
+            // detached, closed, or shown again (selected again, moved to another set) in the mean time
+            if (!w.IsValid || w.CurrentController is not null) return;
+            var window = w.Window;
+            window.IsVisible = false;
+        }
+        catch { }
+    }
+
     /// <summary>
     /// Position of the hosted window relative to the host window rectangle, as of the last full update
     /// </summary>
@@ -93,6 +177,38 @@ public partial class RegisteredWindowController
                 controller.moveTarget = target;
             Interlocked.Exchange(ref controller.moveRequested, 1);
             controller.updateSignal.Set();
+        }
+    }
+
+    /// <summary>
+    /// The size of the area changed (from, to): the hidden windows of the other tabs need the new size too
+    /// </summary>
+    (System.Drawing.Rectangle From, System.Drawing.Rectangle To)? pendingSiblingSync;
+
+    /// <summary>
+    /// Gives the hidden windows of the other tabs of the same host the new size (when the host is resized or
+    /// maximized), so they are ready when their tab is selected. They used to be resized only when shown, so
+    /// the application had to lay out and repaint the whole window at that moment (it looked like a resize/flicker).
+    /// Only windows that covered the same area are synced (not the cells of splitable tabs).
+    /// </summary>
+    void SyncHiddenSiblings(System.Drawing.Rectangle from, System.Drawing.Rectangle to)
+    {
+        var host = Parent.Handle;
+        foreach (var (rw, _) in RegisteredWindow.AllRegistered)
+        {
+            try
+            {
+                if (rw == self || rw.LastHost != host || !rw.IsValid || rw.CurrentController is not null) continue;
+                if (rw.CompatablityMode.NoMoving || rw.Properties.ActivateCrop) continue;
+                if (rw.LastArea.Size != from.Size) continue;
+                var window = rw.Window;
+                if (window.IsVisible) continue;
+                var target = Compensate(to, rw.CachedInvisibleBorders ?? default);
+                rw.LastArea = to;
+                if (window.Bounds != target)
+                    window.Bounds = target;
+            }
+            catch { }
         }
     }
 
@@ -172,9 +288,30 @@ public partial class RegisteredWindowController
                 queueSetVisible = false;
                 // compute the position first so the window doesn't flash at its old location
                 SetBounds(window);
-                window.IsVisible = true;
-                // the invisible borders can only be measured reliably once the window is visible
-                SetBounds(window);
+                if (GetVisiblePendingHide(Parent.Handle, self) is { } previous)
+                {
+                    // Switching tabs: show the new window right below the previous one first, so the application
+                    // has painted it before it comes to the front (otherwise its first, still empty, frame flashed)
+                    PInvoke.SetWindowPos((HWND)window.Handle, (HWND)previous.Handle, 0, 0, 0, 0,
+                        Windows.Win32.UI.WindowsAndMessaging.SET_WINDOW_POS_FLAGS.SWP_NOMOVE |
+                        Windows.Win32.UI.WindowsAndMessaging.SET_WINDOW_POS_FLAGS.SWP_NOSIZE |
+                        Windows.Win32.UI.WindowsAndMessaging.SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE |
+                        Windows.Win32.UI.WindowsAndMessaging.SET_WINDOW_POS_FLAGS.SWP_SHOWWINDOW);
+                    SetBounds(window);
+                    Thread.Sleep(40);
+                    PInvoke.SetWindowPos((HWND)window.Handle, HWND.Null /* HWND_TOP */, 0, 0, 0, 0,
+                        Windows.Win32.UI.WindowsAndMessaging.SET_WINDOW_POS_FLAGS.SWP_NOMOVE |
+                        Windows.Win32.UI.WindowsAndMessaging.SET_WINDOW_POS_FLAGS.SWP_NOSIZE |
+                        Windows.Win32.UI.WindowsAndMessaging.SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE);
+                }
+                else
+                {
+                    window.IsVisible = true;
+                    // the invisible borders can only be measured reliably once the window is visible
+                    SetBounds(window);
+                }
+                // now that this window covers the area, hide the window of the previous tab (see Unregister)
+                FlushPendingHides(Parent.Handle, self);
                 // do not steal focus if we are doing things with other window
                 Thread.Sleep(100);
                 if (isRegistered && !Cursor.IsLeftButtonDown)
@@ -208,6 +345,10 @@ public partial class RegisteredWindowController
         if (requestedRect.Width <= 0 || requestedRect.Height <= 0)
             // the host is not laid out yet
             return;
+        var previousArea = self.LastArea;
+        self.LastArea = requestedRect;
+        if (previousArea.Size != requestedRect.Size && !previousArea.IsEmpty)
+            pendingSiblingSync = (previousArea, requestedRect);
         if (self.Properties.ActivateCrop)
         {
             var cropRegion = self.Properties.CropRegion;
@@ -364,7 +505,8 @@ public partial class RegisteredWindowController
             var signaled = updateSignal.WaitOne(timeout);
             if (!isRegistered) break;
             var full = Interlocked.Exchange(ref fullUpdateRequested, 0) == 1;
-            if (!signaled)
+            var settled = !signaled;
+            if (settled)
             {
                 // the host stopped moving: final update
                 Interlocked.Exchange(ref settleAt, 0);
@@ -377,6 +519,12 @@ public partial class RegisteredWindowController
                     DoMove();
                 if (full)
                     DoUpdatePosition();
+                // resize the hidden tabs once the host is not being resized anymore
+                if (pendingSiblingSync is { } sync && (settled || !ParentMovedRecently))
+                {
+                    pendingSiblingSync = null;
+                    SyncHiddenSiblings(sync.From, sync.To);
+                }
             }
             catch (Exception ex)
             {
@@ -398,10 +546,9 @@ public partial class RegisteredWindowController
         updateSignal.Set();
         parentPositionChangedRegistration.Unregister();
         if (hideWindow && self.IsValid)
-        {
-            var window = self.Window;
-            window.IsVisible = false;
-        }
+            // Not right away: when switching tabs, the window of the new tab is shown a few ms later.
+            // Hiding first showed the empty host in between (a white flash).
+            SchedulePendingHide(Parent.Handle, self);
         if (self.CurrentController == this)
             self.CurrentController = null;
     }

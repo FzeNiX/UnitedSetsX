@@ -89,7 +89,12 @@ partial class UnitedSetsApp : INotifyPropertyChanged
         WinEvents.HookDispatcherQueue = DispatcherQueue;
 
         ReactiveScheduler.AddTickCallbackForCurrentThread(() =>
-            DispatcherQueue.TryEnqueue(DispatcherQueuePriority.High, ReactiveScheduler.Tick)
+            DispatcherQueue.TryEnqueue(DispatcherQueuePriority.High, () =>
+            {
+                // UI updates (bindings): an exception here would otherwise crash the whole app
+                try { ReactiveScheduler.Tick(); }
+                catch (Exception ex) { CrashLog.Write("UI update", ex); }
+            })
         );
         RegisteredWindow.HostedWindowStateRequested += OnHostedWindowStateRequested;
         WindowDragToGroupService.Start();
