@@ -4,3 +4,4 @@ ApplicationActivationManager
 RegisterShellHookWindow
 RegisterWindowMessage
 ClientToScreen
+GetWindowRect

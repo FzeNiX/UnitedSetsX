@@ -49,6 +49,7 @@
                 PointerPressed="{x:Bind TabClickEv}"
                 AllowDrop="True"
                 DragOver="OnDragOverTabViewItem"
+                Loaded="OnTabViewItemLoaded"
                 guics:DragRegion.Clickable="True"
             >
                 <TabViewItem.Header>

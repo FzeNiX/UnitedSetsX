@@ -55,6 +55,8 @@ public partial class App : Application
         {
             try
             {
+                // let the running instance bring its window to the front
+                AllowSetForegroundWindow(MainInstance.ProcessId);
                 await MainInstance.RedirectActivationToAsync(AppInstance.GetCurrent().GetActivatedEventArgs());
             }
             catch (Exception ex)
@@ -91,7 +93,8 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// United Sets was launched again: open a new set window (like browsers do)
+    /// United Sets was launched again (e.g. its shortcut was opened while it runs in the tray): show the settings.
+    /// With command line arguments (e.g. <c>--add-window-by-exe</c>), a new set window handles them.
     /// </summary>
     void OnActivatedByAnotherLaunch(object? sender, AppActivationArguments e)
     {
@@ -102,16 +105,21 @@ public partial class App : Application
         {
             try
             {
-                var window = UnitedSetsApp.Current.CreateNewSetWindow();
-                if (!string.IsNullOrWhiteSpace(arguments))
+                var newArgs = string.IsNullOrWhiteSpace(arguments) ? [] : CLI.Split(arguments);
+                // unpackaged apps get the whole command line, including the executable
+                if (newArgs.Length > 0 && newArgs[0].EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                    newArgs = newArgs[1..];
+                if (newArgs.Length is 0)
                 {
-                    var newArgs = CLI.Split(arguments);
-                    // unpackaged apps get the whole command line, including the executable
-                    if (newArgs.Length > 0 && newArgs[0].EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-                        newArgs = newArgs[1..];
-                    CLI.SetArgs(["UnitedSets.exe", .. newArgs]);
-                    UnitedSetsApp.Current.HandleCLICmds(window);
+                    UnitedSetsApp.Current.OpenSettings();
+                    return;
                 }
+                // started again at sign in while already running: nothing to do
+                if (newArgs.All(a => a.Equals("--background", StringComparison.OrdinalIgnoreCase)))
+                    return;
+                var window = UnitedSetsApp.Current.CreateNewSetWindow();
+                CLI.SetArgs(["UnitedSets.exe", .. newArgs]);
+                UnitedSetsApp.Current.HandleCLICmds(window);
             }
             catch (Exception ex)
             {
@@ -160,6 +168,12 @@ public partial class App : Application
         e.Handled = true;
 #endif
     }
+}
+
+partial class App
+{
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool AllowSetForegroundWindow(uint processId);
 }
 
 public partial class DebugRedir : StringWriter

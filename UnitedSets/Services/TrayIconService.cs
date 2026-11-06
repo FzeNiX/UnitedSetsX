@@ -9,14 +9,15 @@ namespace UnitedSets.Services;
 /// Notification area (tray) icon. United Sets keeps running in the background when every set window is closed
 /// (like Groupy), so windows can still be grouped by dragging them onto each other.
 /// <list type="bullet">
-/// <item>Left click: open a new set window</item>
+/// <item>Left click: bring the last used set window to the front (or the settings when no set is open)</item>
+/// <item>Double click: settings</item>
 /// <item>Right click: menu (new set, settings, exit)</item>
 /// </list>
 /// </summary>
 static class TrayIconService
 {
     const uint WM_APP_TRAY = 0x8000 + 0x55; // WM_APP + n
-    const uint WM_LBUTTONUP = 0x0202, WM_RBUTTONUP = 0x0205, WM_CONTEXTMENU = 0x007B, WM_NULL = 0;
+    const uint WM_LBUTTONUP = 0x0202, WM_LBUTTONDBLCLK = 0x0203, WM_RBUTTONUP = 0x0205, WM_CONTEXTMENU = 0x007B, WM_NULL = 0;
     const uint NIM_ADD = 0, NIM_MODIFY = 1, NIM_DELETE = 2, NIM_SETVERSION = 4;
     const uint NIF_MESSAGE = 1, NIF_ICON = 2, NIF_TIP = 4, NIF_INFO = 0x10;
     const uint NIIF_INFO = 1;
@@ -116,6 +117,8 @@ static class TrayIconService
                 var ev = (uint)(lParam & 0xFFFF);
                 if (ev is WM_LBUTTONUP)
                     UnitedSetsApp.Current.DispatcherQueue.TryEnqueue(OpenOrActivate);
+                else if (ev is WM_LBUTTONDBLCLK)
+                    UnitedSetsApp.Current.DispatcherQueue.TryEnqueue(UnitedSetsApp.Current.OpenSettings);
                 else if (ev is WM_RBUTTONUP or WM_CONTEXTMENU)
                     ShowMenu();
                 return 0;
@@ -138,7 +141,8 @@ static class TrayIconService
         if (UnitedSetsApp.Current.LastActiveWindow is { } w)
             w.Activate();
         else
-            UnitedSetsApp.Current.CreateNewSetWindow();
+            // no set is open: windows are grouped by dragging them, an empty set window is not useful here
+            UnitedSetsApp.Current.OpenSettings();
     }
 
     static void ShowMenu()
@@ -161,7 +165,7 @@ static class TrayIconService
                 app.DispatcherQueue.TryEnqueue(() => app.CreateNewSetWindow());
                 break;
             case CmdSettings:
-                app.DispatcherQueue.TryEnqueue(() => app.Settings.LaunchSettings(app.MainWindow));
+                app.DispatcherQueue.TryEnqueue(app.OpenSettings);
                 break;
             case CmdExit:
                 app.DispatcherQueue.TryEnqueue(() => app.ExitReleasingAllWindows());

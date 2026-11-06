@@ -26,6 +26,7 @@ partial class TabBase
         //    },
         //    ClassStyle: WNDCLASS_STYLES.CS_VREDRAW | WNDCLASS_STYLES.CS_HREDRAW,
         //    BackgroundBrush: new(PInvoke.GetStockObject(GET_STOCK_OBJECT_FLAGS.BLACK_BRUSH).Value));
+        Settings.AutoTabColors.PropertyChanged += (_, _) => RefreshAllTabColors();
         Thread UpdateStatusLoop = new(StaticUpdateStatusThreadLoop)
         {
             Name = "United Sets Update Status Loop"

@@ -147,6 +147,21 @@ partial class UnitedSetsApp : INotifyPropertyChanged
     }
 
     /// <summary>
+    /// Opens (or brings to the front) the settings window.
+    /// </summary>
+    public void OpenSettings()
+    {
+        try
+        {
+            Settings.LaunchSettings(MainWindow);
+        }
+        catch (Exception ex)
+        {
+            Helpers.CrashLog.Write("Opening the settings", ex);
+        }
+    }
+
+    /// <summary>
     /// Finds the tab (in any set window) that hosts the given window.
     /// </summary>
     public (MainWindow Window, TabBase Tab)? FindTab(nint hwnd)

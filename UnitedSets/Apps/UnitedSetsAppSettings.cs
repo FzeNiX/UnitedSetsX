@@ -85,6 +85,15 @@ public partial class UnitedSetsAppSettings
                 Icon = SymbolEx.ViewAll,
                 UserInterfaceVisibility = Visibility.Visible
             },
+            AutoTabColors = new(
+                () => Configuration.AutoTabColors ?? true, x => Configuration.AutoTabColors = x
+            )
+            {
+                Title = "Color tabs like their window",
+                Description = "Each tab takes the color of its window's title bar, e.g. the color of each Chrome or Edge profile. Right-click a tab to pick a color yourself.",
+                Icon = SymbolEx.Color,
+                UserInterfaceVisibility = Visibility.Visible
+            },
             StartWithWindows = new(
                 () => Helpers.StartupHelper.IsEnabled, x => Helpers.StartupHelper.IsEnabled = x
             )
@@ -284,6 +293,7 @@ public partial class UnitedSetsAppSettings
     public OnOffSetting GroupWithAnyWindow { get; }
     public OnOffSetting StartWithWindows { get; }
     public OnOffSetting TaskbarTabThumbnails { get; }
+    public OnOffSetting AutoTabColors { get; }
     public SelectSetting<TabDroppedOutsideBehaviors> TabDroppedOutsideBehavior { get; }
     public OnOffSetting TabSwitchHotkeys { get; }
     public SelectSetting<CloseSetWithTabsBehaviors> CloseSetWithTabsBehavior { get; }

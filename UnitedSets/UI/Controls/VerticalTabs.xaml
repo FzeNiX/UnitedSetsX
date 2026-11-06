@@ -51,6 +51,10 @@
                             <ColumnDefinition />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
+                        <!-- the color of the tab -->
+                        <Border Grid.ColumnSpan="2" Margin="-8,4,0,4" Width="3" CornerRadius="1.5"
+                            HorizontalAlignment="Left" IsHitTestVisible="False"
+                            Background="{x:Bind local:TabColorLayer.ToBrush(TabColor), Mode=OneWay}" />
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />

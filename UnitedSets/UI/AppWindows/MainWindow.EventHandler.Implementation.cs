@@ -158,6 +158,10 @@ public sealed partial class MainWindow
     }
     private partial void OnWindowMessageReceived(WindowMessageEventArgs e)
     {
+        if (e.Message.MessageId is WM_SYSCOMMAND or WM_ENTERSIZEMOVE or WM_EXITSIZEMOVE or 0x0216 or 0x0047 &&
+            HandleHostDragMessage(e.Message.MessageId, (nuint)e.Message.WParam, (nint)e.Message.LParam))
+            // the tabbed windows are hidden while the set window is dragged (see MainWindow.HostDrag.cs)
+            return;
         if (e.Message.MessageId is 0x0216 /* WM_MOVING */)
         {
             // move the tabbed window together with the set (instead of one step behind it)

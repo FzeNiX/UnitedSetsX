@@ -161,6 +161,8 @@ public partial class RegisteredWindowController
         foreach (var (controller, _) in Active)
         {
             if (controller.Parent.Handle != hostHwnd || !controller.isRegistered || !controller.hasRelativeToHost) continue;
+            // hidden while the host is dragged: it is put in place when the drag ends
+            if (controller.hiddenForHostDrag) continue;
             var self = controller.self;
             if (!self.IsValid || self.CompatablityMode.NoMoving) continue;
             var rect = controller.LatestRequestedRect;
@@ -209,6 +211,142 @@ public partial class RegisteredWindowController
                     window.Bounds = target;
             }
             catch { }
+        }
+    }
+
+    // ---- dragging the host ----
+    // A hosted window is another application's window: it can only be moved after the host moved, by another
+    // SetWindowPos that the application has to process. While the user drags the host, the hosted window was always
+    // one frame (or more) behind it ("jelly"). Instead, the host shows a picture of the hosted windows while it is
+    // dragged (see HideForHostDrag) and the real windows are put back in place when the drag ends.
+
+    /// <summary>
+    /// Hidden by <see cref="HideForHostDrag"/> (until <see cref="ShowAfterHostDrag"/>)
+    /// </summary>
+    volatile bool hiddenForHostDrag;
+    /// <summary>
+    /// Set by <see cref="ShowAfterHostDrag"/>: the positioning thread puts the window in place and shows it
+    /// </summary>
+    volatile bool showAfterHostDrag;
+    Action? shownAfterHostDrag;
+
+    /// <summary>
+    /// The screen rectangles (physical pixels) of the hosted windows of <paramref name="hostHwnd"/> that are on screen
+    /// right now (as shown, without the invisible borders).
+    /// </summary>
+    public static List<(nint Hwnd, Rectangle Area)> GetVisibleHostedAreas(nint hostHwnd)
+    {
+        List<(nint, Rectangle)> areas = [];
+        foreach (var (controller, _) in Active)
+        {
+            if (controller.Parent.Handle != hostHwnd || !controller.isRegistered || controller.hiddenForHostDrag) continue;
+            var self = controller.self;
+            if (!self.IsValid || self.CompatablityMode.NoMoving) continue;
+            var hwnd = (HWND)self.Window.Handle;
+            if (!PInvoke.IsWindowVisible(hwnd) || PInvoke.IsIconic(hwnd)) continue;
+            if (GetFrameBounds(hwnd) is { } frame)
+                areas.Add((hwnd, frame));
+        }
+        return areas;
+    }
+
+    static unsafe Rectangle? GetFrameBounds(HWND hwnd)
+    {
+        RECT frame;
+        if (PInvoke.DwmGetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE.DWMWA_EXTENDED_FRAME_BOUNDS, &frame, (uint)sizeof(RECT)).Failed &&
+            !PInvoke.GetWindowRect(hwnd, out frame))
+            return null;
+        if (frame.right <= frame.left || frame.bottom <= frame.top) return null;
+        return Rectangle.FromLTRB(frame.left, frame.top, frame.right, frame.bottom);
+    }
+
+    /// <summary>
+    /// Hides the visible hosted windows of <paramref name="hostHwnd"/> while the host is being dragged (call on the
+    /// host thread, once the host shows a picture of them). They stop following the host until
+    /// <see cref="ShowAfterHostDrag"/> is called. Windows of applications that don't respond are left alone.
+    /// </summary>
+    /// <returns>How many windows were hidden</returns>
+    public static int HideForHostDrag(nint hostHwnd)
+    {
+        int count = 0;
+        foreach (var (controller, _) in Active)
+        {
+            if (controller.Parent.Handle != hostHwnd || !controller.isRegistered || controller.hiddenForHostDrag) continue;
+            var self = controller.self;
+            if (!self.IsValid || self.CompatablityMode.NoMoving) continue;
+            var hwnd = (HWND)self.Window.Handle;
+            if (!PInvoke.IsWindowVisible(hwnd) || PInvoke.IsIconic(hwnd) || PInvoke.IsHungAppWindow(hwnd)) continue;
+            controller.hiddenForHostDrag = true;
+            controller.Updating = true;
+            try
+            {
+                PInvoke.SetWindowPos(hwnd, HWND.Null, 0, 0, 0, 0,
+                    Windows.Win32.UI.WindowsAndMessaging.SET_WINDOW_POS_FLAGS.SWP_NOMOVE |
+                    Windows.Win32.UI.WindowsAndMessaging.SET_WINDOW_POS_FLAGS.SWP_NOSIZE |
+                    Windows.Win32.UI.WindowsAndMessaging.SET_WINDOW_POS_FLAGS.SWP_NOZORDER |
+                    Windows.Win32.UI.WindowsAndMessaging.SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE |
+                    Windows.Win32.UI.WindowsAndMessaging.SET_WINDOW_POS_FLAGS.SWP_HIDEWINDOW);
+            }
+            finally
+            {
+                controller.Updating = false;
+            }
+            count++;
+        }
+        return count;
+    }
+
+    /// <summary>
+    /// Puts the windows hidden by <see cref="HideForHostDrag"/> back in place in the host and shows them
+    /// (asynchronously). <paramref name="onShown"/> is called once per window (on another thread), after it is shown.
+    /// </summary>
+    /// <returns>How many windows will be shown (= how many times <paramref name="onShown"/> will be called)</returns>
+    public static int ShowAfterHostDrag(nint hostHwnd, Action onShown)
+    {
+        int count = 0;
+        foreach (var (controller, _) in Active)
+        {
+            if (controller.Parent.Handle != hostHwnd || !controller.hiddenForHostDrag || controller.showAfterHostDrag) continue;
+            controller.shownAfterHostDrag = onShown;
+            controller.showAfterHostDrag = true;
+            controller.updateSignal.Set();
+            count++;
+        }
+        return count;
+    }
+
+    void DoShowAfterHostDrag()
+    {
+        var callback = Interlocked.Exchange(ref shownAfterHostDrag, null);
+        try
+        {
+            if (!isRegistered || !self.IsValid) return;
+            Updating = true;
+            try
+            {
+                var window = self.Window;
+                // in place first (still hidden), then shown without changing the z-order: the host covers it
+                // with a picture until the application has painted it
+                SetBounds(window);
+                PInvoke.SetWindowPos((HWND)window.Handle, HWND.Null, 0, 0, 0, 0,
+                    Windows.Win32.UI.WindowsAndMessaging.SET_WINDOW_POS_FLAGS.SWP_NOMOVE |
+                    Windows.Win32.UI.WindowsAndMessaging.SET_WINDOW_POS_FLAGS.SWP_NOSIZE |
+                    Windows.Win32.UI.WindowsAndMessaging.SET_WINDOW_POS_FLAGS.SWP_NOZORDER |
+                    Windows.Win32.UI.WindowsAndMessaging.SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE |
+                    Windows.Win32.UI.WindowsAndMessaging.SET_WINDOW_POS_FLAGS.SWP_SHOWWINDOW);
+                // the invisible borders can only be measured once the window is visible
+                SetBounds(window);
+            }
+            finally
+            {
+                Updating = false;
+            }
+        }
+        finally
+        {
+            hiddenForHostDrag = false;
+            showAfterHostDrag = false;
+            callback?.Invoke();
         }
     }
 
@@ -515,6 +653,19 @@ public partial class RegisteredWindowController
             }
             try
             {
+                if (showAfterHostDrag)
+                {
+                    Interlocked.Exchange(ref moveRequested, 0);
+                    DoShowAfterHostDrag();
+                    full = false;
+                }
+                else if (hiddenForHostDrag)
+                {
+                    // nothing to do while hidden: put in place when shown again
+                    Interlocked.Exchange(ref moveRequested, 0);
+                    if (full) Interlocked.Exchange(ref fullUpdateRequested, 1);
+                    continue;
+                }
                 if (Interlocked.Exchange(ref moveRequested, 0) == 1)
                     DoMove();
                 if (full)
@@ -544,6 +695,9 @@ public partial class RegisteredWindowController
         Active.TryRemove(this, out _);
         // wake the thread so it can exit
         updateSignal.Set();
+        if (Interlocked.Exchange(ref shownAfterHostDrag, null) is { } waiting)
+            // the host waits for this window to be shown again: don't make it wait for nothing
+            waiting();
         parentPositionChangedRegistration.Unregister();
         if (hideWindow && self.IsValid)
             // Not right away: when switching tabs, the window of the new tab is shown a few ms later.

@@ -25,6 +25,28 @@ public partial class WindowHostTab : TabBase
         RegisteredWindow.ShownByUser += AttemptToSelectTab;
         _Title = DefaultTitle;
         UpdateAppIcon();
+        colorIdentity = TabColors.GetIdentity(WindowEx.Handle);
+    }
+
+    readonly string? colorIdentity;
+    public override string? ColorIdentity => colorIdentity;
+    /// <summary>
+    /// Whether the title bar color was seen at least once
+    /// </summary>
+    bool colorDetected;
+    int colorCheckTicks;
+
+    /// <summary>
+    /// Looks at the color of the window's title bar (for the automatic tab color). Any thread.
+    /// </summary>
+    void DetectColor()
+    {
+        if (!UnitedSetsApp.Current.Settings.AutoTabColors.Value || !Window.IsValid) return;
+        if (TabColors.TryDetectTitleBarColor(Window.Handle, out var color))
+        {
+            colorDetected = true;
+            SetDetectedColor(color);
+        }
     }
 
     private async void AttemptToSelectTab()
@@ -57,10 +79,20 @@ public partial class WindowHostTab : TabBase
         // already in a tab
         if (UnitedSetsApp.Current.FindTab(newWindow.Handle) is not null)
             return null;
+        // the color of its title bar, while it is still on screen (it may be hidden right away)
+        Color? color = null;
+        var colorSeen = UnitedSetsApp.Current.Settings.AutoTabColors.Value && newWindow.IsVisible &&
+            TabColors.TryDetectTitleBarColor(newWindow.Handle, out color);
         var registeredWindow = PostProcessingRegisteredWindow.Register(newWindow, shouldBeHidden);
         if (registeredWindow is null)
             return null;
-        return new WindowHostTab(registeredWindow, UnitedSetsApp.Current.DispatcherQueue, newWindow, Constants.IsAltTabVisible);
+        var tab = new WindowHostTab(registeredWindow, UnitedSetsApp.Current.DispatcherQueue, newWindow, Constants.IsAltTabVisible);
+        if (colorSeen)
+        {
+            tab.colorDetected = true;
+            tab.SetDetectedColor(color);
+        }
+        return tab;
     }
 
     async void UpdateAppIcon()

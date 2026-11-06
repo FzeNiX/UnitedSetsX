@@ -55,6 +55,13 @@ public sealed partial class HorizontalTabs : TabView
         if (Owner is not null && sender is FrameworkElement tvi && tvi.Tag is TabBase tb && TabDragDrop.DraggedTab != tb)
             SelectedIndex = Owner.Tabs.IndexOf(tb);
     }
+    // the color of the tab (see TabColorLayer)
+    void OnTabViewItemLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is TabViewItem item)
+            TabColorLayer.Attach(item);
+    }
+
     [Event(typeof(DragEventHandler))]
     void OnDropOverTabView(DragEventArgs e)
     {

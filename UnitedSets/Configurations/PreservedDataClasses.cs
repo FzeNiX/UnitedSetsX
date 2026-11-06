@@ -106,6 +106,9 @@ public partial class SavedInstanceData : CloneableBase, INotifyPropertyChanged
     public bool? _TaskbarTabThumbnails;
 
     [AutoNotifyProperty]
+    public bool? _AutoTabColors;
+
+    [AutoNotifyProperty]
     public TabDroppedOutsideBehaviors? _TabDroppedOutsideBehavior;
 
     [AutoNotifyProperty]

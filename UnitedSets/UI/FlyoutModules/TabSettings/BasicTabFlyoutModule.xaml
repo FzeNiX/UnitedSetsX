@@ -27,6 +27,14 @@
                     </Button>
                 </StackPanel>
             </Grid>
+            <StackPanel Spacing="6">
+                <TextBlock Text="Tab color" />
+                <StackPanel x:Name="ColorSwatches" Orientation="Horizontal" Spacing="4" />
+                <TextBlock x:Name="ColorScopeText"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    TextWrapping="Wrap" />
+            </StackPanel>
         </StackPanel>
     </Border>
 </Grid>
