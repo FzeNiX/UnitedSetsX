@@ -82,8 +82,12 @@ public partial class SavedInstanceData : CloneableBase, INotifyPropertyChanged
     [AutoNotifyProperty]
     public CloseTabBehaviors _CloseTabBehaviors;
 
+    // replaced by TabbedWindowDrag (still read from older configuration files)
     [AutoNotifyProperty]
     public UserMoveWindowBehaviors _UserMoveWindowBehavior;
+
+    [AutoNotifyProperty]
+    public TabbedWindowDragBehaviors? _TabbedWindowDrag;
 
 
     [AutoNotifyProperty]

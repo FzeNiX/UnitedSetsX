@@ -245,6 +245,16 @@ static class WindowDragToGroupService
         return shift || band.Contains(cursor) ? new(null, window, null, band) : null;
     }
 
+    /// <summary>
+    /// Whether the key that takes a tabbed window out of its set (when dragging it by its own title bar) is held:
+    /// the grouping key, or Ctrl when grouping doesn't use a key.
+    /// </summary>
+    public static bool IsTakeOutKeyDown() => Mode switch
+    {
+        DragToGroupModes.WithoutKey or DragToGroupModes.Disabled => Keyboard.IsControlDown,
+        var mode => IsGroupingKeyDown(mode)
+    };
+
     static bool IsGroupingKeyDown(DragToGroupModes mode) => mode switch
     {
         DragToGroupModes.HoldCtrl => Keyboard.IsControlDown,

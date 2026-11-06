@@ -161,8 +161,9 @@ public partial class RegisteredWindowController
         foreach (var (controller, _) in Active)
         {
             if (controller.Parent.Handle != hostHwnd || !controller.isRegistered || !controller.hasRelativeToHost) continue;
-            // hidden while the host is dragged: it is put in place when the drag ends
-            if (controller.hiddenForHostDrag) continue;
+            // hidden while the host is dragged, or dragged by the user (the host follows it):
+            // it is put in place when the drag ends
+            if (controller.hiddenForHostDrag || controller.self.IsDraggingHost) continue;
             var self = controller.self;
             if (!self.IsValid || self.CompatablityMode.NoMoving) continue;
             var rect = controller.LatestRequestedRect;
@@ -214,6 +215,18 @@ public partial class RegisteredWindowController
         }
     }
 
+    internal nint ParentHandle => Parent.Handle;
+
+    /// <summary>
+    /// Asks every hosted window of <paramref name="hostHwnd"/> to be put where it belongs (asynchronously)
+    /// </summary>
+    public static void RefreshHost(nint hostHwnd)
+    {
+        foreach (var (controller, _) in Active)
+            if (controller.Parent.Handle == hostHwnd && controller.isRegistered)
+                controller.QueueUpdatePosition(resetCorrections: true);
+    }
+
     // ---- dragging the host ----
     // A hosted window is another application's window: it can only be moved after the host moved, by another
     // SetWindowPos that the application has to process. While the user drags the host, the hosted window was always
@@ -232,11 +245,12 @@ public partial class RegisteredWindowController
 
     /// <summary>
     /// The screen rectangles (physical pixels) of the hosted windows of <paramref name="hostHwnd"/> that are on screen
-    /// right now (as shown, without the invisible borders).
+    /// right now (as shown, without the invisible borders): where they are, and where they should be (they may have
+    /// been moved a bit, e.g. when the user started dragging one by its title bar).
     /// </summary>
-    public static List<(nint Hwnd, Rectangle Area)> GetVisibleHostedAreas(nint hostHwnd)
+    public static List<(nint Hwnd, Rectangle Area, Rectangle Expected)> GetVisibleHostedAreas(nint hostHwnd)
     {
-        List<(nint, Rectangle)> areas = [];
+        List<(nint, Rectangle, Rectangle)> areas = [];
         foreach (var (controller, _) in Active)
         {
             if (controller.Parent.Handle != hostHwnd || !controller.isRegistered || controller.hiddenForHostDrag) continue;
@@ -244,8 +258,12 @@ public partial class RegisteredWindowController
             if (!self.IsValid || self.CompatablityMode.NoMoving) continue;
             var hwnd = (HWND)self.Window.Handle;
             if (!PInvoke.IsWindowVisible(hwnd) || PInvoke.IsIconic(hwnd)) continue;
-            if (GetFrameBounds(hwnd) is { } frame)
-                areas.Add((hwnd, frame));
+            if (GetFrameBounds(hwnd) is not { } frame) continue;
+            var expected = frame;
+            var requested = controller.LatestRequestedRect;
+            if (requested.Width > 0 && PInvoke.GetWindowRect(hwnd, out var actual))
+                expected.Offset(requested.X - actual.left, requested.Y - actual.top);
+            areas.Add((hwnd, frame, expected));
         }
         return areas;
     }
@@ -315,6 +333,35 @@ public partial class RegisteredWindowController
         return count;
     }
 
+    /// <summary>
+    /// Whether the window is hidden because the host is being dragged
+    /// </summary>
+    internal bool IsHiddenForHostDrag => hiddenForHostDrag;
+
+    /// <summary>
+    /// The window was shown by something else while hidden for a drag of the host (e.g. Windows maximized it because it
+    /// was dragged to the top of the screen): hide it again.
+    /// </summary>
+    internal void HideAgainForHostDrag()
+    {
+        if (!hiddenForHostDrag || showAfterHostDrag) return;
+        var hwnd = (HWND)self.Window.Handle;
+        Updating = true;
+        try
+        {
+            PInvoke.SetWindowPos(hwnd, HWND.Null, 0, 0, 0, 0,
+                Windows.Win32.UI.WindowsAndMessaging.SET_WINDOW_POS_FLAGS.SWP_NOMOVE |
+                Windows.Win32.UI.WindowsAndMessaging.SET_WINDOW_POS_FLAGS.SWP_NOSIZE |
+                Windows.Win32.UI.WindowsAndMessaging.SET_WINDOW_POS_FLAGS.SWP_NOZORDER |
+                Windows.Win32.UI.WindowsAndMessaging.SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE |
+                Windows.Win32.UI.WindowsAndMessaging.SET_WINDOW_POS_FLAGS.SWP_HIDEWINDOW);
+        }
+        finally
+        {
+            Updating = false;
+        }
+    }
+
     void DoShowAfterHostDrag()
     {
         var callback = Interlocked.Exchange(ref shownAfterHostDrag, null);
@@ -325,6 +372,9 @@ public partial class RegisteredWindowController
             try
             {
                 var window = self.Window;
+                // maximized by Windows during the drag (dragged to the top of the screen): back to normal, still hidden
+                if (PInvoke.IsZoomed((HWND)window.Handle) || PInvoke.IsIconic((HWND)window.Handle))
+                    WindowPlacementHelper.RestoreHidden(window.Handle);
                 // in place first (still hidden), then shown without changing the z-order: the host covers it
                 // with a picture until the application has painted it
                 SetBounds(window);
@@ -659,7 +709,7 @@ public partial class RegisteredWindowController
                     DoShowAfterHostDrag();
                     full = false;
                 }
-                else if (hiddenForHostDrag)
+                else if (hiddenForHostDrag || self.IsDraggingHost)
                 {
                     // nothing to do while hidden: put in place when shown again
                     Interlocked.Exchange(ref moveRequested, 0);

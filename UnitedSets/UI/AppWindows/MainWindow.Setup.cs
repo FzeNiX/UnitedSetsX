@@ -27,6 +27,8 @@ partial class MainWindow : NativeHelperWindow
         UnitedSetsApp.Current.RegisterUnitedSetsWindow(this);
 
         Init();
+        // created now: added to the tree during the first drag, it was not shown in time
+        EnsureHostDragOverlay();
         taskbarTabs = new(this);
         Closed += (_, _) => IsClosed = true;
         SelectedTabProp.Watch(tab =>
@@ -84,8 +86,15 @@ partial class MainWindow : NativeHelperWindow
             ShellHookMessage = (WindowMessages)Windows.Win32.PInvoke.RegisterWindowMessage("SHELLHOOK");
             Windows.Win32.PInvoke.RegisterShellHookWindow(new(Win32Window.Handle));
         }
-        RegisteredWindow.ShouldWindowBeDetachOnUserMove =
-            _ => UnitedSetsApp.Current.Settings.UserMoveWindowBehavior.Value is UserMoveWindowBehaviors.DetachWindow;
+        // dragging a tabbed window by its own title bar
+        RegisteredWindow.UserMoveActionChooser = _ => UnitedSetsApp.Current.Settings.TabbedWindowDrag.Value switch
+        {
+            TabbedWindowDragBehaviors.TakeOut => UserMoveAction.Detach,
+            TabbedWindowDragBehaviors.PutBack => UserMoveAction.PutBack,
+            // moves the whole set, unless the grouping key is held: then the window comes out of the set
+            // (and can be dropped onto another set)
+            _ => Services.WindowDragToGroupService.IsTakeOutKeyDown() ? UserMoveAction.Detach : UserMoveAction.MoveHost
+        };
     }
 
     WindowMessages ShellHookMessage;

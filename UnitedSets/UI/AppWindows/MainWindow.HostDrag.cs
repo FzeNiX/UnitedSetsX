@@ -121,6 +121,18 @@ partial class MainWindow
         return false;
     }
 
+    static bool IsLeftButtonDown()
+    {
+        // the primary button may be the right one
+        var vk = GetSystemMetrics(23 /* SM_SWAPBUTTON */) != 0 ? 0x02 : 0x01;
+        return (GetAsyncKeyState(vk) & 0x8000) != 0;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern short GetAsyncKeyState(int vk);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern int GetSystemMetrics(int index);
+
     bool OnHostMoving(nint movingRect)
     {
         switch (hostDrag)
@@ -134,11 +146,7 @@ partial class MainWindow
                 }
                 return false;
             case HostDragState.Prepared:
-                // The picture must be on screen before the windows disappear (otherwise the empty set window shows):
-                // a frame was rendered with it, plus a bit of time for the screen to show that frame.
-                // (Rendered is only raised when something changed: don't wait for more frames than that.)
-                var sincePrepared = Environment.TickCount64 - hostDragPreparedAt;
-                if (!(hostDragRenderedFrames >= 1 && sincePrepared >= MinPictureShowMs) && sincePrepared < MaxPictureRenderWaitMs)
+                if (!IsPictureOnScreen())
                 {
                     // not yet: keep the set window where it is for this step (a few ms at most at the start of the
                     // drag), rather than letting the windows trail behind it
@@ -152,20 +160,54 @@ partial class MainWindow
                         movingRect, false);
                     return true;
                 }
-                if (RegisteredWindowController.HideForHostDrag(Win32Window.Handle) > 0)
-                {
-                    hostDrag = HostDragState.Hidden;
-                    StopWatchingRender();
-                    return true;
-                }
-                RemoveHostDragPicture();
-                hostDrag = HostDragState.Unavailable;
-                return false;
+                return HideWindowsForHostDrag();
             case HostDragState.Hidden:
                 return true;
             default:
                 return false;
         }
+    }
+
+    /// <summary>
+    /// The picture must be on screen before the windows disappear (otherwise the empty set window shows): a frame was
+    /// rendered with it, plus a bit of time for the screen to show that frame. (Rendered is only raised when something
+    /// changed: don't wait for more frames than that.)
+    /// </summary>
+    bool IsPictureOnScreen()
+    {
+        var sincePrepared = Environment.TickCount64 - hostDragPreparedAt;
+        return hostDragRenderedFrames >= 1 && sincePrepared >= MinPictureShowMs || sincePrepared >= MaxPictureRenderWaitMs;
+    }
+
+    /// <summary>
+    /// Hides the tabbed windows: from now on only the picture moves with the set window
+    /// </summary>
+    /// <returns>Whether windows were hidden</returns>
+    bool HideWindowsForHostDrag()
+    {
+        if (RegisteredWindowController.HideForHostDrag(Win32Window.Handle) > 0)
+        {
+            hostDrag = HostDragState.Hidden;
+            StopWatchingRender();
+            return true;
+        }
+        RemoveHostDragPicture();
+        hostDrag = HostDragState.Unavailable;
+        return false;
+    }
+
+    /// <summary>
+    /// Ends a drag of the set window (the windows are hidden): shows them again once the set window has settled
+    /// </summary>
+    void EndHostDrag()
+    {
+        hostDrag = HostDragState.Ending;
+        hostDragEndPhase = HostDragEndPhase.Settling;
+        hostDragEndRect = GetWindowRectangle();
+        // Windows snaps/maximizes the window when it is released (just before or just after this) and
+        // animates it: the windows are shown once the animation is over
+        var sinceResize = Environment.TickCount64 - hostDragLastResizeAt;
+        StartHostDragTimer(sinceResize < 200 ? (int)Math.Max(60, SnapAnimationMs - sinceResize) : 60);
     }
 
     void OnExitSizeMove()
@@ -181,13 +223,7 @@ partial class MainWindow
                 hostDrag = HostDragState.None;
                 break;
             case HostDragState.Hidden:
-                hostDrag = HostDragState.Ending;
-                hostDragEndPhase = HostDragEndPhase.Settling;
-                hostDragEndRect = GetWindowRectangle();
-                // Windows snaps/maximizes the window when it is released (just before or just after this) and
-                // animates it: the windows are shown once the animation is over
-                var sinceResize = Environment.TickCount64 - hostDragLastResizeAt;
-                StartHostDragTimer(sinceResize < 200 ? (int)Math.Max(60, SnapAnimationMs - sinceResize) : 60);
+                EndHostDrag();
                 break;
         }
     }
@@ -202,9 +238,16 @@ partial class MainWindow
         var windows = RegisteredWindowController.GetVisibleHostedAreas(host);
         if (windows.Count is 0) return false;
         var area = windows.Select(x => x.Area).Aggregate(Rectangle.Union);
+        // where the picture goes: where the windows belong (a window dragged by its title bar moved a bit already)
+        var place = windows.Select(x => x.Expected).Aggregate(Rectangle.Union);
+        if (place.Size != area.Size) place = area;
         // only what is inside the set window
-        area.Intersect(GetWindowRectangle());
-        if (area.Width <= 0 || area.Height <= 0) return false;
+        var setRect = GetWindowRectangle();
+        var visiblePlace = Rectangle.Intersect(place, setRect);
+        if (visiblePlace.Width <= 0 || visiblePlace.Height <= 0) return false;
+        area = new(area.X + visiblePlace.X - place.X, area.Y + visiblePlace.Y - place.Y, visiblePlace.Width, visiblePlace.Height);
+        area.Intersect(new(GetSystemMetrics(76), GetSystemMetrics(77), GetSystemMetrics(78), GetSystemMetrics(79))); // the virtual screen
+        if (area.Size != visiblePlace.Size) return false;
         // something else in front of the windows would end up in the picture
         var expected = windows.Select(x => x.Hwnd).Append(host).ToHashSet();
         if (!ScreenCapture.IsShowing(area, expected.Contains)) return false;
@@ -216,7 +259,7 @@ partial class MainWindow
             stream.Write(picture.Pixels, 0, picture.Pixels.Length);
         bitmap.Invalidate();
         overlay.Source = bitmap;
-        overlay.Margin = ToRootGridMargin(area);
+        overlay.Margin = ToRootGridMargin(visiblePlace);
         overlay.Visibility = Visibility.Visible;
         hostDragPicture = picture;
         hostDragPreparedAt = Environment.TickCount64;
@@ -315,6 +358,13 @@ partial class MainWindow
             switch (hostDragEndPhase)
             {
                 case HostDragEndPhase.Settling:
+                    if (CheckRideAlongSnap())
+                    {
+                        // the set window was snapped/maximized (animated): wait for it
+                        hostDragEndRect = GetWindowRectangle();
+                        StartHostDragTimer(SnapAnimationMs);
+                        break;
+                    }
                     ShowWindowsAfterHostDrag();
                     break;
                 case HostDragEndPhase.Showing:
@@ -368,6 +418,7 @@ partial class MainWindow
         hostDragCover = null;
         RemoveHostDragPicture();
         hostDrag = HostDragState.None;
+        FinishRideAlong();
     }
 
     /// <summary>
@@ -375,6 +426,12 @@ partial class MainWindow
     /// </summary>
     void AbortHostDrag()
     {
+        if (mouseHook != 0)
+        {
+            UnhookWindowsHookEx(mouseHook);
+            mouseHook = 0;
+        }
+        rideAlongWindow = 0;
         try
         {
             if (hostDrag is HostDragState.Hidden or HostDragState.Ending)

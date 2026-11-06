@@ -28,11 +28,40 @@ public partial class RegisteredWindow : INotifyPropertyChanged
             or "Windows.UI.Core.CoreWindow" // Quick Settings and Notification Center (other uwp apps should already be ApplicationFrameHost)
         ;
     /// <summary>
-    /// Checks if the window should be detach
+    /// Decides what happens when the user drags a hosted window by its own title bar
+    /// (called when the drag starts, on the hook thread)
     /// </summary>
-    public static Func<Window, bool>
-        ShouldWindowBeDetachOnUserMove
-    { get; set; } = (window) => true;
+    public static Func<Window, UserMoveAction> UserMoveActionChooser { get; set; } = _ => UserMoveAction.Detach;
+    /// <summary>
+    /// Raised (on the hook thread) when the user presses the mouse button on the title bar (or border) of a hosted
+    /// window: it may be about to be dragged (see <see cref="HostDragRequested"/>), or not (<see cref="UserMoveEnded"/>).
+    /// The second argument is the host.
+    /// </summary>
+    public static event Action<RegisteredWindow, nint>? UserMoveStarting;
+    /// <summary>
+    /// Raised (on the hook thread) when the user releases a hosted window after <see cref="UserMoveStarting"/>, when
+    /// it was not dragged with the host following it (that ends with <see cref="HostDragEnded"/>).
+    /// </summary>
+    public static event Action<RegisteredWindow, nint>? UserMoveEnded;
+    /// <summary>
+    /// Raised (on the hook thread) when the user starts dragging a hosted window by its own title bar and
+    /// <see cref="UserMoveActionChooser"/> chose <see cref="UserMoveAction.MoveHost"/>. The application keeps dragging
+    /// its window (it is not put back while that lasts): the host (second argument) should follow the mouse until
+    /// <see cref="HostDragEnded"/>. The third argument is where the window was when the drag started (screen pixels):
+    /// the application moves it by as much as the mouse moved since the button was pressed.
+    /// </summary>
+    public static event Action<RegisteredWindow, nint, System.Drawing.Point>? HostDragRequested;
+    /// <summary>
+    /// Raised (on the hook thread) when the drag started with <see cref="HostDragRequested"/> ends (the mouse button
+    /// was released). The window may have been snapped or maximized by Windows (Aero Snap) and must be put back.
+    /// </summary>
+    public static event Action<RegisteredWindow, nint>? HostDragEnded;
+    /// <summary>
+    /// The user drags this window by its title bar and the host follows (see <see cref="HostDragRequested"/>)
+    /// </summary>
+    public bool IsDraggingHost => draggingHost;
+    volatile bool draggingHost;
+    nint draggingHostHandle;
     /// <summary>
     /// Raised (on the hook thread) when a hosted window gets minimized or maximized by itself,
     /// e.g. using its own minimize/maximize button, Win+Down or Win+Up. The hosted window is
@@ -94,9 +123,10 @@ public partial class RegisteredWindow : INotifyPropertyChanged
                 (_, _, idObject, idChild, _, _) =>
                 {
                     if (!WinEvents.IsWindowItself(idObject, idChild)) return;
-                    if (CurrentController is null) return;
+                    if (CurrentController is not { } controller) return;
                     userMoveSizeStartBounds = Window.Bounds;
                     IsUserMovingOrResizing = true;
+                    UserMoveStarting?.Invoke(this, controller.ParentHandle);
                 }
             );
             registeredMoveSizeEndEvent = WinEvents.Register(
@@ -106,6 +136,14 @@ public partial class RegisteredWindow : INotifyPropertyChanged
                 (_, _, idObject, idChild, _, _) =>
                 {
                     if (!WinEvents.IsWindowItself(idObject, idChild)) return;
+                    if (draggingHost)
+                    {
+                        draggingHost = false;
+                        HostDragEnded?.Invoke(this, draggingHostHandle);
+                        return;
+                    }
+                    if (CurrentController is { } controller)
+                        UserMoveEnded?.Invoke(this, controller.ParentHandle);
                     if (!IsUserMovingOrResizing) return;
                     IsUserMovingOrResizing = false;
                     // the user resized the window by its border (or dragged it while detaching is disabled):
@@ -122,6 +160,12 @@ public partial class RegisteredWindow : INotifyPropertyChanged
             {
                 // also raised when the caret is shown
                 if (!WinEvents.IsWindowItself(idObject, idChild)) return;
+                if (CurrentController is { IsHiddenForHostDrag: true, Updating: false } hidden)
+                {
+                    // shown by something else while the host is dragged (e.g. Windows maximized it)
+                    hidden.HideAgainForHostDrag();
+                    return;
+                }
                 if (CurrentController is null || !CurrentController.Updating)
                 {
                     ShownByUser?.Invoke();
@@ -150,6 +194,10 @@ public partial class RegisteredWindow : INotifyPropertyChanged
         if (controller.Updating)
             // current controller is doing the update
             return;
+        if (draggingHost || controller.IsHiddenForHostDrag)
+            // being dragged by the user (the host follows), or hidden while the host is dragged:
+            // put in place when the drag ends (restoring a maximized hidden window would show it)
+            return;
         var bounds = Window.Bounds;
         if (bounds == controller.LatestRequestedRect)
             // same position
@@ -166,13 +214,25 @@ public partial class RegisteredWindow : INotifyPropertyChanged
         }
         if (IsUserMovingOrResizing)
         {
-            // Only detach when the user drags the window (title bar), not when they resize it by the border
+            // Only when the user drags the window (title bar), not when they resize it by the border
             var start = userMoveSizeStartBounds;
             var isMove = bounds.Size == start.Size && bounds.Location != start.Location;
-            if (isMove && ShouldWindowBeDetachOnUserMove(Window))
+            if (isMove)
             {
-                IsUserMovingOrResizing = false;
-                controller.DispatcherQueue.TryEnqueue(Detach);
+                switch (UserMoveActionChooser(Window))
+                {
+                    case UserMoveAction.Detach:
+                        IsUserMovingOrResizing = false;
+                        controller.DispatcherQueue.TryEnqueue(Detach);
+                        return;
+                    case UserMoveAction.MoveHost:
+                        IsUserMovingOrResizing = false;
+                        // the application keeps dragging its window (hidden by the host soon), the host follows
+                        draggingHost = true;
+                        draggingHostHandle = controller.ParentHandle;
+                        HostDragRequested?.Invoke(this, controller.ParentHandle, start.Location);
+                        return;
+                }
             }
             // otherwise wait for the user to finish (move size end will put it back)
             return;
@@ -338,6 +398,18 @@ partial class RegisteredWindow
         Windows.Win32.PInvoke.DwmSetWindowAttribute((Windows.Win32.Foundation.HWND)window.Handle,
             Windows.Win32.Graphics.Dwm.DWMWINDOWATTRIBUTE.DWMWA_TRANSITIONS_FORCEDISABLED, &value, (uint)sizeof(Windows.Win32.Foundation.BOOL));
     }
+}
+/// <summary>
+/// What happens when the user drags a hosted window by its own title bar
+/// </summary>
+public enum UserMoveAction
+{
+    /// <summary>The window leaves the host (it is detached and keeps being dragged)</summary>
+    Detach,
+    /// <summary>The window is put back where it belongs when the user releases it</summary>
+    PutBack,
+    /// <summary>The host is dragged instead (see <see cref="RegisteredWindow.HostDragRequested"/>)</summary>
+    MoveHost
 }
 public enum HostedWindowStateRequest
 {

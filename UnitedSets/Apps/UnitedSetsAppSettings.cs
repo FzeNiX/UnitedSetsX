@@ -45,13 +45,13 @@ public partial class UnitedSetsAppSettings
                 UserInterfaceVisibility = Visibility.Visible,
                 OOBEUserInterfaceVisibility = Visibility.Visible
             },
-            UserMoveWindowBehavior = new(
-                () => Configuration.UserMoveWindowBehavior, x => Configuration.UserMoveWindowBehavior = x,
-                Enum.GetValues<UserMoveWindowBehaviors>()
+            TabbedWindowDrag = new(
+                () => Configuration.TabbedWindowDrag ?? TabbedWindowDragBehaviors.MoveSet, x => Configuration.TabbedWindowDrag = x,
+                Enum.GetValues<TabbedWindowDragBehaviors>()
             )
             {
-                Title = "Moving added window behavior",
-                Description = "What happens when you drag a tabbed window by its title bar?",
+                Title = "Dragging a tabbed window by its own title bar",
+                Description = "What happens when you drag the title bar of a window in a set (not the tab bar). The grouping key is the one chosen in \"Grouping windows by dragging\" (Ctrl when grouping doesn't use a key).",
                 Icon = SymbolEx.Move,
                 UserInterfaceVisibility = Visibility.Visible,
                 OOBEUserInterfaceVisibility = Visibility.Visible
@@ -288,7 +288,7 @@ public partial class UnitedSetsAppSettings
     public SelectSetting<CloseTabBehaviors> CloseTabBehavior { get; }
     public OnOffSetting Autosave { get; }
     public SelectSetting<UnitedSetsLayouts> Layout { get; }
-    public SelectSetting<UserMoveWindowBehaviors> UserMoveWindowBehavior { get; }
+    public SelectSetting<TabbedWindowDragBehaviors> TabbedWindowDrag { get; }
     public SelectSetting<DragToGroupModes> DragToGroupMode { get; }
     public OnOffSetting GroupWithAnyWindow { get; }
     public OnOffSetting StartWithWindows { get; }
@@ -354,11 +354,23 @@ public enum CloseTabBehaviors
     [Display(Name = "Close Window")]
     CloseWindow
 }
+/// <summary>
+/// Replaced by <see cref="TabbedWindowDragBehaviors"/> (kept so that older configuration files still load)
+/// </summary>
 public enum UserMoveWindowBehaviors
 {
     [Display(Name = "Detach Window")]
     DetachWindow,
     Ignore
+}
+public enum TabbedWindowDragBehaviors
+{
+    [Display(Name = "Move the whole set (hold the grouping key to take the window out)")]
+    MoveSet,
+    [Display(Name = "Take the window out of the set")]
+    TakeOut,
+    [Display(Name = "Put the window back")]
+    PutBack
 }
 public enum DragToGroupModes
 {

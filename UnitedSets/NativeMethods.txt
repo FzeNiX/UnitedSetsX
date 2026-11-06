@@ -5,3 +5,5 @@ RegisterShellHookWindow
 RegisterWindowMessage
 ClientToScreen
 GetWindowRect
+SetWindowPos
+GetCursorPos

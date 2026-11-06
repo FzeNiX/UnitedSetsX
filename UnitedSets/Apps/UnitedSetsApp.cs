@@ -97,6 +97,15 @@ partial class UnitedSetsApp : INotifyPropertyChanged
             })
         );
         RegisteredWindow.HostedWindowStateRequested += OnHostedWindowStateRequested;
+        // a tabbed window is dragged by its own title bar: the whole set moves
+        RegisteredWindow.UserMoveStarting += (window, host) =>
+            SetWindows.FirstOrDefault(w => w.Win32Window.Handle == host)?.PrepareRideAlong(window);
+        RegisteredWindow.UserMoveEnded += (window, host) =>
+            SetWindows.FirstOrDefault(w => w.Win32Window.Handle == host)?.CancelRideAlong(window);
+        RegisteredWindow.HostDragRequested += (window, host, windowStart) =>
+            SetWindows.FirstOrDefault(w => w.Win32Window.Handle == host)?.StartRideAlong(window, windowStart);
+        RegisteredWindow.HostDragEnded += (window, host) =>
+            SetWindows.FirstOrDefault(w => w.Win32Window.Handle == host)?.EndRideAlong(window);
         WindowDragToGroupService.Start();
         HotkeyService.Start();
         TrayIconService.Start();
